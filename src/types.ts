@@ -21,6 +21,8 @@ export interface TTSResult {
   base64Audio: string; // wav/mp3 base64
   mimeType?: string;
   timeline: KeyframeState[];
+  isProceduralFallback?: boolean;
+  isLocalGpu?: boolean;
 }
 
 export interface SocialPost {

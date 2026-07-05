@@ -211,6 +211,7 @@ export default function VoiceCloner({
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [useBrowserSpeechFallback, setUseBrowserSpeechFallback] = useState(true);
   
   // TTS configuration
   const [scriptText, setScriptText] = useState(
@@ -218,6 +219,12 @@ export default function VoiceCloner({
   );
   const [targetLang, setTargetLang] = useState("English");
   const [voiceTheme, setVoiceTheme] = useState("conversational");
+  const [modelEngine, setModelEngine] = useState<"google" | "qwen3" | "chatterbox">("google");
+  const [qwen3Instructions, setQwen3Instructions] = useState("");
+
+  const insertParalinguisticTag = (tag: string) => {
+    setScriptText(prev => prev + " " + tag + " ");
+  };
   
   // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -622,6 +629,10 @@ export default function VoiceCloner({
     setIsSynthesizing(true);
     setError(null);
 
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+
     try {
       let referenceAudioBase64 = null;
       if (audioBlob && stepAMode === "clone") {
@@ -636,6 +647,8 @@ export default function VoiceCloner({
         referenceAudio: referenceAudioBase64,
         accent: selectedAccent,
         voiceTheme: voiceTheme,
+        model_engine: modelEngine,
+        qwen3_instructions: qwen3Instructions,
       });
       onSpeechGenerated(result);
       playCompletionSound();
@@ -647,8 +660,92 @@ export default function VoiceCloner({
     }
   };
 
+  const playBrowserSpeech = (text: string, lang: string) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    const langCodes: Record<string, string> = {
+      "English": "en-US",
+      "Spanish": "es-ES",
+      "French": "fr-FR",
+      "German": "de-DE",
+      "Japanese": "ja-JP",
+      "Hindi": "hi-IN",
+      "Urdu": "ur-PK",
+      "Italian": "it-IT",
+      "Arabic": "ar-SA",
+      "Portuguese": "pt-PT"
+    };
+    
+    utterance.lang = langCodes[lang] || "en-US";
+    
+    const voices = window.speechSynthesis.getVoices();
+    const matches = voices.filter(v => v.lang.startsWith(utterance.lang.split("-")[0]));
+    
+    const isFemale = activeProfile?.genderEstimate !== "masculine";
+    const selectedVoice = matches.find(v => {
+      const name = v.name.toLowerCase();
+      if (isFemale) {
+        return name.includes("female") || name.includes("google us english") || name.includes("samantha") || name.includes("zira") || name.includes("karen") || name.includes("moira");
+      } else {
+        return name.includes("male") || name.includes("david") || name.includes("mark") || name.includes("ravi") || name.includes("george");
+      }
+    }) || matches[0] || voices[0];
+    
+    if (selectedVoice) {
+      utterance.voice = selectedVoice;
+    }
+    
+    if (activeProfile?.tempo === "fast") utterance.rate = 1.25;
+    else if (activeProfile?.tempo === "slow") utterance.rate = 0.8;
+    else utterance.rate = 1.0;
+    
+    if (activeProfile?.pitch === "high") utterance.pitch = 1.15;
+    else if (activeProfile?.pitch === "low") utterance.pitch = 0.85;
+    else utterance.pitch = 1.0;
+
+    utterance.onstart = () => {
+      setIsPlaying(true);
+    };
+    utterance.onend = () => {
+      setIsPlaying(false);
+      setCurrentPlayTime(0);
+    };
+    utterance.onerror = () => {
+      setIsPlaying(false);
+    };
+
+    const durationEstimate = Math.max(2000, text.split(" ").length * 380);
+    setDuration(durationEstimate / 1000);
+    
+    let startTime = Date.now();
+    const interval = setInterval(() => {
+      if (!window.speechSynthesis || !window.speechSynthesis.speaking) {
+        clearInterval(interval);
+        return;
+      }
+      const elapsed = (Date.now() - startTime) / 1000;
+      setCurrentPlayTime(Math.min(durationEstimate / 1000, elapsed));
+    }, 100);
+
+    window.speechSynthesis.speak(utterance);
+  };
+
   // Synthesized speech playback controls
   const togglePlayAudio = () => {
+    if (activeTTS?.isProceduralFallback && useBrowserSpeechFallback) {
+      if (isPlaying) {
+        if (typeof window !== "undefined" && window.speechSynthesis) {
+          window.speechSynthesis.cancel();
+        }
+        setIsPlaying(false);
+      } else {
+        playBrowserSpeech(activeTTS.translatedText, targetLang);
+      }
+      return;
+    }
+
     if (!playAudioRef.current || !activeTTS?.base64Audio) return;
     
     if (isPlaying) {
@@ -1006,70 +1103,163 @@ export default function VoiceCloner({
           </h3>
 
           <div className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="text-xs text-slate-400 font-bold mb-1.5 block">Language Mode</label>
-                <select
-                  value={targetLang}
-                  onChange={(e) => setTargetLang(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 text-slate-200 text-sm py-2 px-3 rounded-xl focus:border-emerald-500 focus:outline-none cursor-pointer"
-                >
-                  <option value="English">English (Original Style)</option>
-                  <option value="Spanish">Spanish (Español)</option>
-                  <option value="French">French (Français)</option>
-                  <option value="German">German (Deutsch)</option>
-                  <option value="Japanese">Japanese (日本語)</option>
-                  <option value="Hindi">Hindi (हिन्दी)</option>
-                  <option value="Urdu">Urdu (اردو)</option>
-                  <option value="Italian">Italian (Italiano)</option>
-                  <option value="Arabic">Arabic (العربية)</option>
-                  <option value="Portuguese">Portuguese (Português)</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 font-bold mb-1.5 block">Voice Accent Style</label>
-                <select
-                  value={selectedAccent}
-                  onChange={(e) => setSelectedAccent(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 text-slate-200 text-sm py-2 px-3 rounded-xl focus:border-emerald-500 focus:outline-none cursor-pointer"
-                >
-                  <option value="American (General)">American (General)</option>
-                  <option value="British (RP - London)">British (RP - London)</option>
-                  <option value="British (Scottish)">British (Scottish)</option>
-                  <option value="British (Irish)">British (Irish)</option>
-                  <option value="Australian">Australian</option>
-                  <option value="Indian English">Indian English</option>
-                  <option value="Hindi Accented English">Hindi Accented English</option>
-                  <option value="Urdu Accented English">Urdu Accented English</option>
-                  <option value="Pakistani (Urdu Dialect)">Pakistani (Urdu Dialect)</option>
-                  <option value="South African">South African</option>
-                  <option value="Spanish Accented English">Spanish Accented English</option>
-                  <option value="French Accented English">French Accented English</option>
-                  <option value="Italian Accented English">Italian Accented English</option>
-                  <option value="German Accented English">German Accented English</option>
-                  <option value="Japanese Accented English">Japanese Accented English</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs text-slate-400 font-bold mb-1.5 block">Delivery Theme / Style</label>
-                <select
-                  value={voiceTheme}
-                  onChange={(e) => setVoiceTheme(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-850 text-slate-200 text-sm py-2 px-3 rounded-xl focus:border-emerald-500 focus:outline-none cursor-pointer"
-                >
-                  <option value="conversational">Neutral Conversational</option>
-                  <option value="advertisement">Advertisement / Promo</option>
-                  <option value="storyteller">Storyteller / Narrator</option>
-                  <option value="fast-paced">Fast-paced Shorts (YouTube/TikTok)</option>
-                  <option value="horror">Horror / Suspenseful</option>
-                  <option value="news">News Broadcast</option>
-                  <option value="educational">Educational / Tutorial</option>
-                  <option value="trailer">Movie Trailer (Epic)</option>
-                </select>
+            {/* Model Switcher */}
+            <div className="bg-slate-950 border border-slate-900/60 p-3 rounded-xl space-y-2">
+              <label className="text-xs text-slate-400 font-bold block">Active Text-to-Speech Engine</label>
+              <div className="grid grid-cols-3 gap-2">
+                {(["google", "qwen3", "chatterbox"] as const).map((engine) => (
+                  <button
+                    key={engine}
+                    type="button"
+                    onClick={() => setModelEngine(engine)}
+                    className={`px-3 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer border ${
+                      modelEngine === engine
+                        ? "bg-emerald-600 border-emerald-500 text-white shadow-md"
+                        : "bg-slate-900 border-slate-850 text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    {engine === "google" ? "Google (Cloud)" : engine === "qwen3" ? "Qwen3-TTS (GPU)" : "Chatterbox (GPU)"}
+                  </button>
+                ))}
               </div>
             </div>
+
+            {modelEngine === "google" && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-400 font-bold mb-1.5 block">Language Mode</label>
+                  <select
+                    value={targetLang}
+                    onChange={(e) => setTargetLang(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-slate-200 text-sm py-2 px-3 rounded-xl focus:border-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="English">English (Original Style)</option>
+                    <option value="Spanish">Spanish (Español)</option>
+                    <option value="French">French (Français)</option>
+                    <option value="German">German (Deutsch)</option>
+                    <option value="Japanese">Japanese (日本語)</option>
+                    <option value="Hindi">Hindi (हिन्दी)</option>
+                    <option value="Urdu">Urdu (اردو)</option>
+                    <option value="Italian">Italian (Italiano)</option>
+                    <option value="Arabic">Arabic (العربية)</option>
+                    <option value="Portuguese">Portuguese (Português)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 font-bold mb-1.5 block">Voice Accent Style</label>
+                  <select
+                    value={selectedAccent}
+                    onChange={(e) => setSelectedAccent(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-slate-200 text-sm py-2 px-3 rounded-xl focus:border-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="American (General)">American (General)</option>
+                    <option value="British (RP - London)">British (RP - London)</option>
+                    <option value="British (Scottish)">British (Scottish)</option>
+                    <option value="British (Irish)">British (Irish)</option>
+                    <option value="Australian">Australian</option>
+                    <option value="Indian English">Indian English</option>
+                    <option value="Hindi Accented English">Hindi Accented English</option>
+                    <option value="Urdu Accented English">Urdu Accented English</option>
+                    <option value="Pakistani (Urdu Dialect)">Pakistani (Urdu Dialect)</option>
+                    <option value="South African">South African</option>
+                    <option value="Spanish Accented English">Spanish Accented English</option>
+                    <option value="French Accented English">French Accented English</option>
+                    <option value="Italian Accented English">Italian Accented English</option>
+                    <option value="German Accented English">German Accented English</option>
+                    <option value="Japanese Accented English">Japanese Accented English</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs text-slate-400 font-bold mb-1.5 block">Delivery Theme / Style</label>
+                  <select
+                    value={voiceTheme}
+                    onChange={(e) => setVoiceTheme(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-slate-200 text-sm py-2 px-3 rounded-xl focus:border-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="conversational">Neutral Conversational</option>
+                    <option value="advertisement">Advertisement / Promo</option>
+                    <option value="storyteller">Storyteller / Narrator</option>
+                    <option value="fast-paced">Fast-paced Shorts (YouTube/TikTok)</option>
+                    <option value="horror">Horror / Suspenseful</option>
+                    <option value="news">News Broadcast</option>
+                    <option value="educational">Educational / Tutorial</option>
+                    <option value="trailer">Movie Trailer (Epic)</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {modelEngine === "qwen3" && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-400 font-bold mb-1.5 block">Language Mode</label>
+                  <select
+                    value={targetLang}
+                    onChange={(e) => setTargetLang(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-slate-200 text-sm py-2 px-3 rounded-xl focus:border-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="English">English</option>
+                    <option value="Spanish">Spanish (Español)</option>
+                    <option value="French">French (Français)</option>
+                    <option value="German">German (Deutsch)</option>
+                    <option value="Japanese">Japanese (日本語)</option>
+                    <option value="Hindi">Hindi (हिन्दी)</option>
+                    <option value="Urdu">Urdu (اردو)</option>
+                    <option value="Italian">Italian (Italiano)</option>
+                    <option value="Arabic">Arabic (العربية)</option>
+                    <option value="Portuguese">Portuguese (Português)</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <label className="text-xs text-slate-400 font-bold mb-1.5 block">Delivery & Accent Instructions</label>
+                  <input
+                    type="text"
+                    value={qwen3Instructions}
+                    onChange={(e) => setQwen3Instructions(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-slate-200 text-sm py-2 px-3 rounded-xl focus:border-emerald-500 focus:outline-none"
+                    placeholder="e.g., Speak in a whispered, eerie Southern Gothic accent..."
+                  />
+                </div>
+              </div>
+            )}
+
+            {modelEngine === "chatterbox" && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-400 font-bold mb-1.5 block">Language Mode</label>
+                  <select
+                    value={targetLang}
+                    onChange={(e) => setTargetLang(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-850 text-slate-200 text-sm py-2 px-3 rounded-xl focus:border-emerald-500 focus:outline-none cursor-pointer"
+                  >
+                    <option value="English">English</option>
+                    <option value="Spanish">Spanish (Español)</option>
+                    <option value="French">French (Français)</option>
+                    <option value="German">German (Deutsch)</option>
+                    <option value="Japanese">Japanese (日本語)</option>
+                    <option value="Hindi">Hindi (हिन्दी)</option>
+                    <option value="Urdu">Urdu (اردو)</option>
+                  </select>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-[10px] text-slate-500 font-bold block mb-1">Click to Insert Chatterbox Paralinguistic Tags:</span>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {["[laugh]", "[sigh]", "[cough]", "[gasp]", "[whisper]", "[screaming]", "[crying]", "[giggle]"].map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => insertParalinguisticTag(tag)}
+                        className="bg-slate-900 hover:bg-slate-850 text-slate-300 hover:text-emerald-400 border border-slate-800 hover:border-slate-750 px-2 py-1 rounded text-[11px] font-mono transition-all cursor-pointer"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="text-xs text-slate-400 font-bold mb-1.5 block">Enter Script Text / Prompt</label>
@@ -1082,7 +1272,9 @@ export default function VoiceCloner({
               />
               <div className="flex justify-between items-center mt-1">
                 <span className="text-[10px] text-slate-500">{scriptText.length} characters</span>
-                <span className="text-[10px] text-emerald-400 font-semibold">Accent set to: {selectedAccent}</span>
+                <span className="text-[10px] text-emerald-400 font-semibold">
+                  {modelEngine === "google" ? `Accent set to: ${selectedAccent}` : `Engine: ${modelEngine.toUpperCase()}`}
+                </span>
               </div>
             </div>
 
@@ -1132,6 +1324,35 @@ export default function VoiceCloner({
                   Clone Generated
                 </span>
               </div>
+
+              {activeTTS.isProceduralFallback && (
+                <div className="bg-amber-500/5 border border-amber-500/10 rounded-xl p-4 text-xs text-amber-400 space-y-3">
+                  <div className="flex items-center gap-1.5 font-bold text-[13px]">
+                    <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+                    Premium Cloud Quota Exhausted Fallback Activated
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    The Gemini TTS daily free-tier quota has been exhausted. We have automatically activated a local procedural cloner.
+                  </p>
+                  <div className="flex items-center justify-between bg-slate-900/80 p-3 rounded-lg border border-slate-800/80">
+                    <div className="space-y-0.5 pr-2">
+                      <span className="block text-[11px] text-slate-200 font-semibold">Enable Browser Neural Voice Fallback</span>
+                      <span className="block text-[10px] text-slate-500 leading-normal">Uses your device's built-in crystal clear speech engine (Recommended).</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setUseBrowserSpeechFallback(!useBrowserSpeechFallback)}
+                      className={`text-[11px] font-bold px-3 py-1.5 rounded-lg transition-all cursor-pointer select-none shrink-0 border ${
+                        useBrowserSpeechFallback 
+                          ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20" 
+                          : "bg-slate-800 text-slate-400 border-slate-700 hover:bg-slate-750"
+                      }`}
+                    >
+                      {useBrowserSpeechFallback ? "ON (Natural)" : "OFF (Robotic)"}
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {/* Simple subtitle overlay */}
               <div className="bg-slate-900 border border-slate-850 rounded-xl p-4 text-center min-h-[70px] flex flex-col justify-center">

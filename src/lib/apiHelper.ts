@@ -50,6 +50,16 @@ export const makeApiRequest = async (endpoint: string, bodyObj: any) => {
   }
 
   // Cloud API request routed through Cloud Run proxy (injects custom user-provided API key to handle quota rate-limiting)
+  if (!key) {
+    const currentCredits = parseInt(localStorage.getItem("gemini_credits_left") || "10", 10);
+    if (currentCredits <= 0) {
+      throw new Error("Gemini Cloud Quota Exhausted (0/10 credits left). Please click the Settings gear icon in the top right and enter your personal Gemini API Key to unlock unlimited cloud credits.");
+    }
+    const nextCredits = currentCredits - 1;
+    localStorage.setItem("gemini_credits_left", String(nextCredits));
+    window.dispatchEvent(new CustomEvent("gemini-credits-updated", { detail: nextCredits }));
+  }
+
   const cloudHeaders = getHeaders();
   const response = await fetch(endpoint, {
     method: "POST",

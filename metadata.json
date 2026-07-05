@@ -1,6 +1,6 @@
 {
   "name": "AI Voice Clone & Character Animator",
-  "description": "Roo Gen Premium Studio: A high-fidelity hybrid generative multimedia platform using local RTX 4070 GPU hardware acceleration for ultra-low latency F5-TTS/XTTS voice cloning and SadTalker/LivePortrait cinematic face animations, paired with Gemini Cloud orchestrations.",
+  "description": "SA Studio: A high-fidelity hybrid generative multimedia platform using local RTX 4070 GPU hardware acceleration for ultra-low latency F5-TTS/XTTS voice cloning and SadTalker/LivePortrait cinematic face animations, paired with Gemini Cloud orchestrations.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

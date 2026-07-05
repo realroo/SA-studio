@@ -1,27 +1,8 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-
-# Virtual environments
-.venv/
-venv/
-
-# Environment variables
-.env
-
-# Node
 node_modules/
-
-# Build output
-dist/
 build/
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-Thumbs.db
+dist/
+coverage/
 .DS_Store
+*.log
+.env*
+!.env.example
