@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Roo Gen AI Studio</title>
+    <script>
+      (function() {
+        try {
+          const originalFetch = window.fetch;
+          let currentFetch = originalFetch;
+          Object.defineProperty(window, 'fetch', {
+            get() { return currentFetch; },
+            set(val) { currentFetch = val; },
+            configurable: true,
+            enumerable: true
+          });
+        } catch (e) {
+          console.warn("Failed to redefine window.fetch setter:", e);
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
